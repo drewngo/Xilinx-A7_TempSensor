@@ -6,34 +6,40 @@ module i2c_master(
   inout SDA
 );
   
-  // ------
-  localparam STATE_IDLE = ;
-  localparam STATE_START = ;
-  localparam STATE_ADDR_WR = ;
-  localparam STATE_ACK_1 = ;
-  localparam STATE_PTR = ;
-  localparam STATE_ACK_2 = ;
-  localparam STATE_RESTART = ;
-  localparam STATE_ADDR_RD = ;
-  localparam STATE_ACK_3 = ;
-  localparam STATE_READ_MSB = ;
-  localparam STATE_MASTER_ACK = ;
-  localparam STATE_READ_LSB = ;
-  localparam STATE_MASTER_NACK = ;
-  localparam STATE_STOP = ;
+//--------------------------------------------------------------------------
 
-  // ------
+  localparam STATE_IDLE        = 4'd0;
+  localparam STATE_START       = 4'd1;
+  localparam STATE_ADDR_WR     = 4'd2; // ADT7420 ~ 7'h4B , Write ~ 1'b0
+  localparam STATE_ACK_1       = 4'd3;
+  localparam STATE_PTR         = 4'd4;
+  localparam STATE_ACK_2       = 4'd5;
+  localparam STATE_RESTART     = 4'd6;
+  localparam STATE_ADDR_RD     = 4'd7;
+  localparam STATE_ACK_3       = 4'd8;
+  localparam STATE_READ_MSB    = 4'd9;
+  localparam STATE_MASTER_ACK  = 4'd10;
+  localparam STATE_READ_LSB    = 4'd11;
+  localparam STATE_MASTER_NACK = 4'd12;
+  localparam STATE_STOP        = 4'd13;
+  
+//--------------------------------------------------------------------------
+
   reg [3:0] current_state;
   reg [3:0] next_state;
 
-  // ------
+//--------------------------------------------------------------------------
+
   reg [9:0] clk_counter;
   reg [2:0] addr_bit_counter;
   reg i2c_clk;
 
-  // ------ 100 kHz clock for i2c
+  // ------ strobe ~ essentially a 200kHz timing pulse
   wire i2c_tick = (clk_counter == 10'd499);
 
+//--------------------------------------------------------------------------
+
+  // ------ 100 kHz clock for i2c
   always @(posedge clk or negedge rst) begin
     
     if (!rst) begin
@@ -66,9 +72,31 @@ module i2c_master(
 
   end
 
+//--------------------------------------------------------------------------
+
   // ------ open drain bus
   assign SCL = (i2c_clk) ? 1'bz : 1'b0;
 
+  // ------ SDA high on write, SDA low on read (impendance)
+  wire sda_mode = (current_state == STATE_IDLE || current_state == STATE_START || current_state == STATE_ADDR_WR) ? 1'b1 : 1'b0;
+  
+  reg sda_out;
+
+  assign SDA = (sda_mode) ? ((sda_out) ? 1'bz : 1'b0) : 1'bz;
+
+//--------------------------------------------------------------------------
+
+  // ------ state register
+  always @(posedge clk or negedge rst) begin
+    if (!rst) begin
+      current_state <= STATE_IDLE;
+    end
+    else if (i2c_tick) begin
+      current_state <= next_state;
+    end
+  end
+
+//--------------------------------------------------------------------------
 
   // ------
   always @(*) begin
@@ -91,7 +119,19 @@ module i2c_master(
           next_state = STATE_ADDR_WR;
         end
       end
+
+      STATE_ACK_1: begin
+        if (i2c_tick && i2c_clk) begin
+          next_state = STATE_PTR;
+        end
+        else begin
+          next_state = STATE_ACK_1;
+        end
+      end
+
     endcase
   end
+
+//--------------------------------------------------------------------------
 
 endmodule
