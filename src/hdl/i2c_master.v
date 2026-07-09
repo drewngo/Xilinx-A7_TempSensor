@@ -34,12 +34,12 @@ module i2c_master(
   reg [2:0] addr_bit_counter;
   reg i2c_clk;
 
-  // ------ strobe ~ essentially a 200kHz timing pulse
+  // strobe ~ essentially a 200kHz timing pulse
   wire i2c_tick = (clk_counter == 10'd499);
 
 //--------------------------------------------------------------------------
 
-  // ------ 100 kHz clock for i2c
+  // 100 kHz clock for i2c
   always @(posedge clk or negedge rst) begin
     
     if (!rst) begin
@@ -61,8 +61,18 @@ module i2c_master(
       // i2c tick for address bit counter
       if (i2c_tick) begin
         case (current_state)
-          STATE_START, STATE_RESTART:   addr_bit_counter <= 3'd7;
-          STATE_ADDR_WR, STATE_ADDR_RD: addr_bit_counter <= addr_bit_counter - 1'b1;
+          STATE_START, 
+          STATE_RESTART, 
+          STATE_ACK_1,
+          STATE_ACK_2,
+          STATE_ACK_3:
+            addr_bit_counter <= 3'd7;
+
+          STATE_ADDR_WR,
+          STATE_PTR,
+          STATE_ADDR_RD,
+          STATE_READ_MSB:
+            addr_bit_counter <= addr_bit_counter - 1'b1;
 
           default: addr_bit_counter <= addr_bit_counter;
         endcase
@@ -74,19 +84,27 @@ module i2c_master(
 
 //--------------------------------------------------------------------------
 
-  // ------ open drain bus
+  // SCL AND SDA BIZ
+  // open drain bus
   assign SCL = (i2c_clk) ? 1'bz : 1'b0;
 
-  // ------ SDA high on write, SDA low on read (impendance)
-  wire sda_mode = (current_state == STATE_IDLE || current_state == STATE_START || current_state == STATE_ADDR_WR) ? 1'b1 : 1'b0;
+  // SDA high on write, SDA low on read (impendance)
+  wire sda_mode = (
+    current_state == STATE_IDLE || 
+    current_state == STATE_START ||
+    current_state == STATE_ADDR_WR ||
+    current_state == STATE_PTR ||
+    current_state == STATE_ADDR_RD
+    ) ? 1'b1 : 1'b0;
   
   reg sda_out;
 
+  // tri-state buffer
   assign SDA = (sda_mode) ? ((sda_out) ? 1'bz : 1'b0) : 1'bz;
 
 //--------------------------------------------------------------------------
 
-  // ------ state register
+  // state register
   always @(posedge clk or negedge rst) begin
     if (!rst) begin
       current_state <= STATE_IDLE;
@@ -98,7 +116,7 @@ module i2c_master(
 
 //--------------------------------------------------------------------------
 
-  // ------
+  // state traversal
   always @(*) begin
     next_state = current_state;
 
@@ -129,6 +147,46 @@ module i2c_master(
         end
       end
 
+      STATE_PTR: begin
+        if (i2c_tick && addr_bit_counter == 3'd0) begin
+          next_state = STATE_ACK_2;
+        end
+        else begin
+          next_state = STATE_PTR;
+        end
+      end
+
+      STATE_ACK_2: begin
+        if (i2c_tick && i2c_clk) begin
+          next_state = STATE_RESTART;
+        end
+        else begin
+          next_state = STATE_ACK_2;
+        end
+      end
+
+      STATE_RESTART: begin
+        next_state = STATE_ADDR_RD;
+      end
+
+      STATE_ADDR_RD: begin
+        if (i2c_tick && addr_bit_counter == 3'd0) begin
+          next_state = STATE_ACK_3;
+        end
+        else begin
+          next_state = STATE_ADDR_RD;
+        end
+      end
+
+      STATE_ACK_3: begin
+        if (i2c_tick && i2c_clk) begin
+          next_state = STATE_READ_MSB;
+        end
+        else begin
+          next_state = STATE_ACK_3;
+        end
+      end
+      
     endcase
   end
 
