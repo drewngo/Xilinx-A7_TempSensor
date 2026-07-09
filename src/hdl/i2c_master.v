@@ -65,13 +65,15 @@ module i2c_master(
           STATE_RESTART, 
           STATE_ACK_1,
           STATE_ACK_2,
-          STATE_ACK_3:
+          STATE_ACK_3,
+          STATE_MASTER_ACK:
             addr_bit_counter <= 3'd7;
 
           STATE_ADDR_WR,
           STATE_PTR,
           STATE_ADDR_RD,
-          STATE_READ_MSB:
+          STATE_READ_MSB,
+          STATE_READ_LSB:
             addr_bit_counter <= addr_bit_counter - 1'b1;
 
           default: addr_bit_counter <= addr_bit_counter;
@@ -94,7 +96,8 @@ module i2c_master(
     current_state == STATE_START ||
     current_state == STATE_ADDR_WR ||
     current_state == STATE_PTR ||
-    current_state == STATE_ADDR_RD
+    current_state == STATE_ADDR_RD ||
+    current_state == STATE_MASTER_ACK
     ) ? 1'b1 : 1'b0;
   
   reg sda_out;
@@ -187,6 +190,46 @@ module i2c_master(
         end
       end
       
+      STATE_READ_MSB: begin
+        if (i2c_tick && addr_bit_counter == 3'd0) begin
+          next_state = STATE_MASTER_ACK;
+        end
+        else begin
+          next_state = STATE_READ_MSB;
+        end
+      end
+
+      STATE_MASTER_ACK: begin
+        if (i2c_tick && i2c_clk) begin
+          next_state = STATE_READ_LSB;
+        end
+        else begin
+          next_state = STATE_MASTER_ACK;
+        end
+      end
+
+      STATE_READ_LSB: begin
+        if (i2c_tick && addr_bit_counter == 3'd0) begin
+          next_state = STATE_MASTER_NACK;
+        end
+        else begin
+          next_state = STATE_READ_LSB;
+        end
+      end
+
+      STATE_MASTER_NACK: begin
+        if (i2c_tick && i2c_clk) begin
+          next_state = STATE_STOP;
+        end
+        else begin
+          next_state = STATE_MASTER_NACK;
+        end
+      end
+
+      STATE_STOP: begin
+        next_state = STATE_IDLE;
+      end
+
     endcase
   end
 
